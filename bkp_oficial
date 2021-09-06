@@ -1,0 +1,67 @@
+:: Limpa C:\bkp_temp antes de começar
+echo [%date%, %time%] Limpando a pasta temporaria antes de começar >> log.txt
+
+START /WAIT powershell Remove-Item C:\bkp_temp\* -Recurse -Force
+
+echo [%date%, %time%] Pasta temporaria limpa >> log.txt
+
+:: Faz o backup de C: para pasta temporária em C:\bkp_temp
+echo [%date%, %time%] Iniciando o WindowsServerBackup >> log.txt
+
+START /WAIT powershell wbadmin start backup -quiet -backuptarget:\\192.168.0.10\bkp_temp -include:C: -exclude:C:\bkp_temp -allcritical 
+
+echo [%date%, %time%] WindowsServerBackup finalizado >> log.txt
+
+::Compacta o arquivo
+    
+echo [%date%, %time%] Compactactacao iniciada >> log.txt
+    
+START /WAIT 7z.exe a -tzip "C:\bkp_temp\WindowsImageBackup.zip" "C:\bkp_temp\WindowsImageBackup"
+::Checa se 7zip ainda está rodando
+    :LOOP
+    tasklist | find /i "7z.exe" >nul 2>&1
+    IF ERRORLEVEL 1 (
+    GOTO CONTINUE
+    ) ELSE (
+    ECHO 7zip ainda rodando
+    Timeout /T 5 /Nobreak
+    GOTO LOOP
+)
+
+:CONTINUE
+echo [%date%, %time%] Compactactacao finalizada >> log.txt
+
+::Sobe o arquivo pro s3
+
+echo [%date%, %time%] Fazendo upload para o AWS S3 >> log.txt
+@echo off
+for /f "delims=" %%i in ('START /WAIT aws s3 cp C:\bkp_temp\WindowsImageBackup.zip s3://forfer-backup/backup/ --storage-class DEEP_ARCHIVE') do (
+    echo [%date%, %time%] %%i >> log.txt
+)
+::Checa se AWS ainda está rodando
+:LOOP2
+    timeout /t 1 /nobreak >nul 2>&1
+    tasklist | find /i "aws.exe" >nul 2>&1
+    IF ERRORLEVEL 1 (
+    GOTO CONTINUE2
+    ) ELSE (
+    ECHO Upload AWS ainda rodando
+    Timeout /T 2 /Nobreak
+    GOTO LOOP2
+)
+:CONTINUE2
+echo [%date%, %time%] Upload encerrado >> log.txt
+
+::Deleta tudo da pasta temporária
+
+echo [%date%, %time%] Limpando a pasta temporaria >> log.txt
+
+START /WAIT powershell Remove-Item C:\bkp_temp\* -Recurse -Force
+
+echo [%date%, %time%] Pasta temporaria limpa >> log.txt
+
+::Sobe o log pro s3
+
+echo [%date%, %time%] Upload do log no AWS S3 >> log.txt
+
+aws s3 cp C:\Arquivos\TI\Script_Backup_Nuvem\log.txt s3://forfer-backup/backup/ --storage-class STANDARD
